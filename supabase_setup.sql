@@ -72,7 +72,10 @@ CREATE TABLE public.leads (
     assigned_editors TEXT,
     production_role VARCHAR(255),
     delivery_target_date DATE,
-    current_status VARCHAR(50)
+    current_status VARCHAR(50),
+    final_amount NUMERIC DEFAULT 0,
+    received_amount NUMERIC DEFAULT 0,
+    pending_amount NUMERIC DEFAULT 0
 );
 
 -- FOLLOW-UPS TABLE (Granular Follow-Up Interactions Tracking list)

@@ -547,6 +547,7 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
     addQuotation,
     updateQuotation,
     updateLead,
+    recordPayment,
     unlockedRecords,
     unlockRecord,
     lockRecord,
@@ -879,6 +880,7 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
     event_type: '',
     custom_event_name: '',
     shoot_type: '',
+    custom_shoot_type: '',
     event_date: '',
     event_time: '',
     event_location: '',
@@ -896,6 +898,7 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
       event_type: '',
       custom_event_name: '',
       shoot_type: '',
+      custom_shoot_type: '',
       event_date: '',
       event_time: '',
       event_location: '',
@@ -1005,6 +1008,10 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
   const [editableDeliverables, setEditableDeliverables] = useState<Record<string, string[]>>({});
   const [quoteDiscount, setQuoteDiscount] = useState<number>(0);
   const [quoteAdditional, setQuoteAdditional] = useState<number>(0);
+
+  // States for logging new payments in Sales Module (Locked leads)
+  const [newPaymentAmount, setNewPaymentAmount] = useState<number>(0);
+  const [newPaymentNotes, setNewPaymentNotes] = useState<string>('');
 
   const handleEditInclusion = (pkgKey: string, index: number, value: string) => {
     setEditableInclusions(prev => {
@@ -1166,6 +1173,13 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
     });
   };
 
+  const handleFieldChange = (field: keyof Lead, value: any) => {
+    if (!selectedLead) return;
+    const updatedLead = { ...selectedLead, [field]: value };
+    setSelectedLead(updatedLead);
+    updateLead(selectedLead.lead_id, { [field]: value });
+  };
+
   // On-change/blur handler for phone/email inputs to detect repeat customers
   const handleCheckExistingCustomer = (type: 'phone' | 'email', value: string) => {
     if (!value || value.length < 5) return;
@@ -1192,13 +1206,13 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
   };
 
   // Handle repeat bookings (Pre-fills customized data and issues a Lead AND dynamic Order immediately)
-  const handleExecuteQuickReorder = (cust: any) => {
+  const handleExecuteQuickReorder = async (cust: any) => {
     if (!reorderForm.event_date) {
       alert('Please specify the event date for the repeat customer booking.');
       return;
     }
 
-    const newLeadId = addLead({
+    const newLeadId = await addLead({
       customer_name: cust.customer_name,
       mobile: cust.mobile,
       alternate_mobile: cust.alternate_mobile || undefined,
@@ -1212,7 +1226,7 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
       remarks: `Dynamic Repeat reservation. [CUST_ID: ${cust.customer_id}]`
     });
 
-    const newOrderId = confirmOrder(
+    const newOrderId = await confirmOrder(
       newLeadId,
       reorderForm.package_name,
       Number(reorderForm.quotation_amount),
@@ -1277,6 +1291,10 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
       alert('Please select a Desired Event Shoot Type.');
       return;
     }
+    if (createForm.shoot_type === 'Other' && (!createForm.custom_shoot_type || createForm.custom_shoot_type.trim() === '')) {
+      alert('Please enter a Custom Shoot Type.');
+      return;
+    }
     if (!createForm.lead_source || createForm.lead_source === '') {
       alert('Please select an Inbound Lead Channel Source.');
       return;
@@ -1289,6 +1307,10 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
     const finalSource = createForm.lead_source === 'Other' ? (otherSource ? `Other: ${otherSource}` : 'Other') : createForm.lead_source;
     const finalEventType = createForm.event_type === 'Other' ? 'Other' : createForm.event_type;
     const finalCustomEventName = createForm.event_type === 'Other' ? createForm.custom_event_name : undefined;
+    const finalShootType = createForm.shoot_type === 'Other' ? (createForm.custom_shoot_type ? `Other: ${createForm.custom_shoot_type.trim()}` : 'Other') : createForm.shoot_type;
+    const finalRemarks = createForm.remarks
+      ? `${createForm.remarks}\n[Shoot Type: ${finalShootType}]`
+      : `[Shoot Type: ${finalShootType}]`;
 
     const selectedPkgs = PACKAGES_LIST.flatMap(cat => cat.items).filter(item => selectedPkgIds.includes(item.id));
     const subtotal = selectedPkgs.reduce((sum, item) => sum + item.cost, 0);
@@ -1313,12 +1335,12 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
         lead_source: finalSource,
         event_type: finalEventType,
         custom_event_name: finalCustomEventName,
-        shoot_type: createForm.shoot_type,
+        shoot_type: finalShootType,
         event_date: createForm.event_date || new Date().toISOString().split('T')[0],
         event_time: createForm.event_time,
         event_location: createForm.event_location,
         budget: selectedPkgIds.length > 0 ? finalTotal : Number(createForm.budget),
-        remarks: createForm.remarks,
+        remarks: finalRemarks,
       }, packagesPayload);
 
       setFormSuccess('Lead Created Successfully!');
@@ -1332,6 +1354,7 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
         event_type: '',
         custom_event_name: '',
         shoot_type: '',
+        custom_shoot_type: '',
         event_date: '',
         event_time: '',
         event_location: '',
@@ -1356,7 +1379,7 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
   };
 
   // Handle follow up submit
-  const handleFollowUpSubmit = (e: React.FormEvent) => {
+  const handleFollowUpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedLead) return;
 
@@ -1366,7 +1389,7 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
         return;
       }
 
-      const orderId = confirmOrder(
+      const orderId = await confirmOrder(
         selectedLead.lead_id,
         selectedLead.event_type + ' Premium Package',
         Number(followUpForm.quotation_amount),
@@ -1413,7 +1436,7 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
   };
 
   // Handle Order Confirmation Process
-  const handleConfirmOrderSubmit = (e: React.FormEvent) => {
+  const handleConfirmOrderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedLead) return;
 
@@ -1422,7 +1445,7 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
       alert("Event date is required before confirming booking.");
       
       // Automatically keep status as 'Follow Up' (which represents Follow Up Required)
-      updateLeadFollowUp(
+      await updateLeadFollowUp(
         selectedLead.lead_id,
         'Follow Up',
         'Attempted booking but event date was not confirmed.',
@@ -1449,7 +1472,7 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
       return;
     }
 
-    const orderId = confirmOrder(
+    const orderId = await confirmOrder(
       selectedLead.lead_id,
       confirmForm.package_name,
       Number(confirmForm.quotation_amount),
@@ -1709,10 +1732,13 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
                         onChange={(e) => setFollowUpForm({ ...followUpForm, status: e.target.value as CurrentStage })}
                         className="w-full bg-slate-900 border border-slate-750 rounded-lg py-1.5 px-3 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       >
+                        <option value="New Lead">New Lead</option>
+                        <option value="Contacted">Contacted</option>
                         <option value="Follow Up">Follow Up</option>
                         <option value="Quotation Sent">Quotation Sent</option>
                         <option value="Negotiation">Negotiation</option>
                         <option value="Order Confirmed">Order Confirmed</option>
+                        <option value="Lost Lead">Lost Lead</option>
                       </select>
                     </div>
                   </div>
@@ -1783,6 +1809,21 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
                             className="w-full bg-slate-900 border border-slate-750 rounded-lg py-1.5 px-3 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
                           />
                         </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-400 mb-1">
+                            Pending Amount (₹) (Auto-calculated)
+                          </label>
+                          <input
+                            type="number"
+                            readOnly
+                            disabled
+                            value={Number(followUpForm.quotation_amount || 0) - Number(followUpForm.advance_received || 0)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-3 text-xs text-emerald-400 font-mono focus:outline-none opacity-80 cursor-not-allowed"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
                           <label className="block text-xs font-medium text-slate-400 mb-1">
                             Payment Mode
@@ -3013,25 +3054,44 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
                   </div>
 
                   {/* Desired Event Shoot Type */}
-                  <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                      Desired Event Shoot Type
-                    </label>
-                    <select
-                      value={createForm.shoot_type}
-                      onChange={(e) => setCreateForm({ ...createForm, shoot_type: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-lg py-2 px-3 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/20 transition-all cursor-pointer"
-                    >
-                      <option value="">Select Shoot Type</option>
-                      <option value="Photography">Photography</option>
-                      <option value="Videography">Videography</option>
-                      <option value="Photography + Videography">Photography + Videography</option>
-                      <option value="Drone Shoot">Drone Shoot</option>
-                      <option value="Cinematic Shoot">Cinematic Shoot</option>
-                      <option value="Live Streaming">Live Streaming</option>
-                      <option value="Album Design">Album Design</option>
-                      <option value="Custom Package">Custom Package</option>
-                    </select>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                        Desired Event Shoot Type
+                      </label>
+                      <select
+                        value={createForm.shoot_type}
+                        onChange={(e) => setCreateForm({ ...createForm, shoot_type: e.target.value })}
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-lg py-2 px-3 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/20 transition-all cursor-pointer"
+                      >
+                        <option value="">Select Shoot Type</option>
+                        <option value="Photography">Photography</option>
+                        <option value="Videography">Videography</option>
+                        <option value="Photography + Videography">Photography + Videography</option>
+                        <option value="Drone Shoot">Drone Shoot</option>
+                        <option value="Cinematic Shoot">Cinematic Shoot</option>
+                        <option value="Live Streaming">Live Streaming</option>
+                        <option value="Album Design">Album Design</option>
+                        <option value="Custom Package">Custom Package</option>
+                        <option value="Other">Other / Custom Shoot Type</option>
+                      </select>
+                    </div>
+
+                    {createForm.shoot_type === 'Other' && (
+                      <div className="space-y-2 text-left animate-fade-in">
+                        <label className="block text-xs font-bold text-amber-500 mb-1.5 uppercase font-mono tracking-wider">
+                          Custom Shoot Type *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Cinematic Reel, Corporate Shoot, Live Streaming, Fashion Shoot, Custom Requirement"
+                          value={createForm.custom_shoot_type}
+                          onChange={(e) => setCreateForm({ ...createForm, custom_shoot_type: e.target.value })}
+                          className="w-full bg-slate-950 border border-amber-500/50 rounded-lg py-2 px-3 text-xs text-amber-200 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-all"
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {/* Lead Source */}
@@ -3995,8 +4055,8 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
 
       {/* Mobile/Tablet Popup Modal for Lead Follow-up Details */}
       {selectedLead && (
-        <div id="lead_details_mobile_modal" className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-0 sm:p-4 overflow-hidden animate-fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-none sm:rounded-2xl w-full sm:w-[95vw] lg:w-[92vw] xl:w-[95vw] xl:max-w-[1600px] h-screen sm:h-[90vh] shadow-2xl relative flex flex-col overflow-hidden text-left bg-gradient-to-tr from-slate-900 via-slate-900 to-slate-950">
+        <div id="lead_details_mobile_modal" className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-0 md:p-6 overflow-hidden animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-none md:rounded-2xl w-full h-full md:w-[95%] md:h-[95%] shadow-2xl relative flex flex-col overflow-hidden text-left bg-gradient-to-tr from-slate-900 via-slate-900 to-slate-950">
             {/* Header: Sticky */}
             <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/40 sticky top-0 z-10 backdrop-blur-md shrink-0">
               <h3 className="text-xs sm:text-sm font-black text-white flex items-center gap-1.5 font-mono uppercase tracking-wider">
@@ -4026,84 +4086,203 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
                         </span>
                         <span className="text-xs text-slate-400 flex items-center gap-1">
                           <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-                          Agent: <strong className="text-slate-200 font-semibold">{selectedLead.sales_person}</strong>
+                          Status: {selectedLead.status}
                         </span>
                       </div>
+
                       <div className="flex items-center gap-1 text-[11px] text-slate-400 font-mono">
                         <span>Source:</span>
-                        <span className="bg-slate-800 text-slate-300 px-2.5 py-0.5 rounded-md border border-slate-700 font-bold">
-                          {selectedLead.lead_source}
-                        </span>
+                        {isLeadLocked ? (
+                          <span className="bg-slate-800 text-slate-300 px-2.5 py-0.5 rounded-md border border-slate-700 font-bold">
+                            {selectedLead.lead_source || 'N/A'}
+                          </span>
+                        ) : (
+                          <select
+                            value={selectedLead.lead_source || ''}
+                            onChange={(e) => handleFieldChange('lead_source', e.target.value)}
+                            className="bg-slate-800 text-slate-200 px-2.5 py-0.5 rounded-md border border-slate-700 font-bold cursor-pointer focus:outline-none"
+                          >
+                            <option value="">Select Source</option>
+                            <option value="Google Ads">Google Ads</option>
+                            <option value="Meta Ads">Meta Ads</option>
+                            <option value="Website">Website</option>
+                            <option value="WhatsApp">WhatsApp</option>
+                            <option value="Referral">Referral</option>
+                            <option value="Instagram">Instagram</option>
+                            <option value="YouTube">YouTube</option>
+                            <option value="Walk-in">Walk-in</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        )}
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
                       {/* Left side: Core Contact Info */}
-                      <div className="space-y-3.5">
-                        <h4 className="text-slate-405 text-[10px] font-bold tracking-wider uppercase">Contact Identity</h4>
-                        <h3 className="text-xl font-bold text-white tracking-tight">{selectedLead.customer_name}</h3>
+                      <div className="space-y-3.5 bg-slate-900/10 p-3 rounded-xl border border-slate-800/20">
+                        <h4 className="text-slate-405 text-[10px] font-bold tracking-wider uppercase flex items-center justify-between">
+                          <span>Contact Identity</span>
+                          {isLeadLocked && <span className="text-amber-500 font-mono text-[9px]">🔒 Locked</span>}
+                        </h4>
                         
-                        <div className="space-y-2.5 text-xs">
-                          <div className="flex items-center gap-3 text-slate-300 bg-slate-900/40 p-3 rounded-xl border border-slate-800/70">
-                            <Phone className="w-4 h-4 text-indigo-400 flex-shrink-0" />
-                            <div>
-                              <span className="font-mono text-slate-200 font-semibold">{formatIndianPhoneNumber(selectedLead.mobile)}</span>
-                              <span className="block text-[9px] text-slate-500">Primary Mobile</span>
-                            </div>
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-[10px] text-slate-500 font-medium block mb-1">Customer Name *</label>
+                            <input
+                              type="text"
+                              value={selectedLead.customer_name}
+                              disabled={isLeadLocked}
+                              onChange={(e) => handleFieldChange('customer_name', e.target.value)}
+                              className="w-full bg-slate-900/60 border border-slate-800 rounded-xl py-2 px-3 text-xs text-slate-150 font-bold focus:outline-none focus:border-indigo-650 focus:ring-1 focus:ring-indigo-500/30 disabled:opacity-75 disabled:cursor-not-allowed"
+                            />
                           </div>
-                          
-                          {selectedLead.alternate_mobile && (
-                            <div className="flex items-center gap-3 text-slate-300 bg-slate-900/40 p-3 rounded-xl border border-slate-800/70">
-                              <Phone className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                              <div>
-                                <span className="font-mono text-slate-200 font-semibold">{formatIndianPhoneNumber(selectedLead.alternate_mobile)}</span>
-                                <span className="block text-[9px] text-slate-500">Alternate Mobile</span>
-                              </div>
-                            </div>
-                          )}
 
-                          <div className="flex items-center gap-3 text-slate-300 bg-slate-900/40 p-3 rounded-xl border border-slate-800/70">
-                            <Mail className="w-4 h-4 text-indigo-400 flex-shrink-0" />
-                            <div className="min-w-0 flex-1">
-                              <span className="text-slate-200 truncate block font-medium" title={selectedLead.email}>{selectedLead.email || 'N/A'}</span>
-                              <span className="block text-[9px] text-slate-500">Email Address</span>
-                            </div>
+                          <div>
+                            <label className="text-[10px] text-slate-500 font-medium block mb-1">Mobile Number *</label>
+                            <input
+                              type="text"
+                              value={selectedLead.mobile}
+                              disabled={isLeadLocked}
+                              onChange={(e) => handleFieldChange('mobile', e.target.value)}
+                              className="w-full bg-slate-900/60 border border-slate-800 rounded-xl py-2 px-3 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-650 focus:ring-1 focus:ring-indigo-500/30 disabled:opacity-75 disabled:cursor-not-allowed"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] text-slate-500 font-medium block mb-1">Alternate Mobile</label>
+                            <input
+                              type="text"
+                              value={selectedLead.alternate_mobile || ''}
+                              disabled={isLeadLocked}
+                              onChange={(e) => handleFieldChange('alternate_mobile', e.target.value)}
+                              className="w-full bg-slate-900/60 border border-slate-800 rounded-xl py-2 px-3 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-650 focus:ring-1 focus:ring-indigo-500/30 disabled:opacity-75 disabled:cursor-not-allowed"
+                              placeholder="Optional alternate mobile"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] text-slate-500 font-medium block mb-1">Email Address</label>
+                            <input
+                              type="email"
+                              value={selectedLead.email || ''}
+                              disabled={isLeadLocked}
+                              onChange={(e) => handleFieldChange('email', e.target.value)}
+                              className="w-full bg-slate-900/60 border border-slate-800 rounded-xl py-2 px-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-650 focus:ring-1 focus:ring-indigo-500/30 disabled:opacity-75 disabled:cursor-not-allowed"
+                              placeholder="Optional email"
+                            />
                           </div>
                         </div>
                       </div>
 
                       {/* Right side: Project Details */}
-                      <div className="space-y-3.5">
-                        <h4 className="text-slate-405 text-[10px] font-bold tracking-wider uppercase">Event Parameters</h4>
+                      <div className="space-y-3.5 bg-slate-900/10 p-3 rounded-xl border border-slate-800/20">
+                        <h4 className="text-slate-405 text-[10px] font-bold tracking-wider uppercase flex items-center justify-between">
+                          <span>Event Parameters</span>
+                          {isLeadLocked && <span className="text-amber-500 font-mono text-[9px]">🔒 Locked</span>}
+                        </h4>
                         
-                        <div className="space-y-2.5 text-xs">
-                          <div className="bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/70 space-y-3">
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                              <div>
-                                <span className="text-slate-500 text-[10px] block font-medium uppercase tracking-wider">Shoot Type</span>
-                                <strong className="text-white text-xs font-bold">{selectedLead.event_type}</strong>
-                              </div>
-                              <div>
-                                <span className="text-slate-500 text-[10px] block font-medium uppercase tracking-wider">Scheduled Date</span>
-                                <strong className="text-indigo-300 text-xs font-bold font-mono">{selectedLead.event_date || 'N/A'}</strong>
-                              </div>
-                              <div>
-                                <span className="text-slate-500 text-[10px] block font-medium uppercase tracking-wider">Event Time</span>
-                                <strong className="text-slate-200 text-xs font-semibold">{formatTime12Hour(selectedLead.event_time)}</strong>
-                              </div>
-                              <div>
-                                <span className="text-slate-500 block text-[10px] uppercase tracking-wider font-medium">Project Budget</span>
-                                <strong className="text-amber-400 text-xs font-black font-mono">{formatINR(selectedLead.budget)}</strong>
-                              </div>
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-[10px] text-slate-500 font-medium block mb-1">Shoot Type / Event *</label>
+                              <select
+                                value={selectedLead.event_type}
+                                disabled={isLeadLocked}
+                                onChange={(e) => handleFieldChange('event_type', e.target.value)}
+                                className="w-full bg-slate-900/60 border border-slate-800 rounded-xl py-2 px-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-650 focus:ring-1 focus:ring-indigo-500/30 disabled:opacity-75 disabled:cursor-not-allowed"
+                              >
+                                <option value="Wedding Shoot">Wedding Shoot</option>
+                                <option value="Destination Wedding">Destination Wedding</option>
+                                <option value="Pre-Wedding Shoot">Pre-Wedding Shoot</option>
+                                <option value="Corporate Event">Corporate Event</option>
+                                <option value="Real Estate Reel">Real Estate Reel</option>
+                                <option value="Fashion Portfolio">Fashion Portfolio</option>
+                                <option value="Music Video Launch">Music Video Launch</option>
+                                <option value="Birthday Banquet">Birthday Banquet</option>
+                                <option value="Other">Other</option>
+                              </select>
                             </div>
 
-                            <div className="border-t border-slate-800/80 pt-2.5 flex items-start gap-2">
-                              <MapPin className="w-3.5 h-3.5 text-indigo-400 mt-0.5 flex-shrink-0" />
-                              <div>
-                                <span className="text-[10px] text-slate-500 block uppercase font-mono tracking-wider">Shoot Location</span>
-                                <span className="text-slate-200 font-semibold leading-relaxed">{selectedLead.event_location || 'N/A'}</span>
-                              </div>
+                            <div>
+                              <label className="text-[10px] text-slate-500 font-medium block mb-1">Shoot Type Scope</label>
+                              <select
+                                value={selectedLead.shoot_type || ''}
+                                disabled={isLeadLocked}
+                                onChange={(e) => handleFieldChange('shoot_type', e.target.value)}
+                                className="w-full bg-slate-900/60 border border-slate-800 rounded-xl py-2 px-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-650 focus:ring-1 focus:ring-indigo-500/30 disabled:opacity-75 disabled:cursor-not-allowed"
+                              >
+                                <option value="">Select Shoot Type</option>
+                                <option value="Photography">Photography</option>
+                                <option value="Videography">Videography</option>
+                                <option value="Photography + Videography">Photography + Videography</option>
+                                <option value="Drone Shoot">Drone Shoot</option>
+                                <option value="Cinematic Shoot">Cinematic Shoot</option>
+                                <option value="Live Streaming">Live Streaming</option>
+                                <option value="Album Design">Album Design</option>
+                                <option value="Custom Package">Custom Package</option>
+                                <option value="Other">Other</option>
+                              </select>
                             </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-[10px] text-slate-500 font-medium block mb-1">Event Date</label>
+                              <input
+                                type="date"
+                                value={selectedLead.event_date || ''}
+                                disabled={isLeadLocked}
+                                onChange={(e) => handleFieldChange('event_date', e.target.value)}
+                                className="w-full bg-slate-900/60 border border-slate-800 rounded-xl py-2 px-3 text-xs text-indigo-300 font-mono focus:outline-none focus:border-indigo-650 focus:ring-1 focus:ring-indigo-500/30 disabled:opacity-75 disabled:cursor-not-allowed"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] text-slate-500 font-medium block mb-1">Event Time</label>
+                              <input
+                                type="time"
+                                value={selectedLead.event_time || ''}
+                                disabled={isLeadLocked}
+                                onChange={(e) => handleFieldChange('event_time', e.target.value)}
+                                className="w-full bg-slate-900/60 border border-slate-800 rounded-xl py-2 px-3 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-650 focus:ring-1 focus:ring-indigo-500/30 disabled:opacity-75 disabled:cursor-not-allowed"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-[10px] text-slate-500 font-medium block mb-1">Project Budget (₹)</label>
+                              <input
+                                type="number"
+                                value={selectedLead.budget || 0}
+                                disabled={isLeadLocked}
+                                onChange={(e) => handleFieldChange('budget', Number(e.target.value) || 0)}
+                                className="w-full bg-slate-900/60 border border-slate-800 rounded-xl py-2 px-3 text-xs text-amber-400 font-extrabold font-mono focus:outline-none focus:border-indigo-650 focus:ring-1 focus:ring-indigo-500/30 disabled:opacity-75 disabled:cursor-not-allowed"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] text-slate-500 font-medium block mb-1">Reporting Time</label>
+                              <input
+                                type="time"
+                                value={selectedLead.reporting_time || '08:00'}
+                                disabled={isLeadLocked}
+                                onChange={(e) => handleFieldChange('reporting_time', e.target.value)}
+                                className="w-full bg-slate-900/60 border border-slate-800 rounded-xl py-2 px-3 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-650 focus:ring-1 focus:ring-indigo-500/30 disabled:opacity-75 disabled:cursor-not-allowed"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] text-slate-500 font-medium block mb-1">Shoot Location</label>
+                            <input
+                              type="text"
+                              value={selectedLead.event_location || ''}
+                              disabled={isLeadLocked}
+                              onChange={(e) => handleFieldChange('event_location', e.target.value)}
+                              className="w-full bg-slate-900/60 border border-slate-800 rounded-xl py-2 px-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-650 focus:ring-1 focus:ring-indigo-500/30 disabled:opacity-75 disabled:cursor-not-allowed"
+                              placeholder="Shoot venue details..."
+                            />
                           </div>
                         </div>
                       </div>
@@ -4638,32 +4817,12 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
                               className="w-full bg-slate-900 border border-slate-800 rounded-lg py-2.5 px-3 text-xs text-slate-100 focus:outline-none focus:border-slate-700"
                             >
                               <option value="New Lead">New Lead</option>
+                              <option value="Contacted">Contacted</option>
                               <option value="Follow Up">Follow Up</option>
                               <option value="Quotation Sent">Quotation Sent</option>
                               <option value="Negotiation">Negotiation</option>
                               <option value="Order Confirmed">Order Confirmed</option>
-                              <option disabled>── Production/Operations Stages ──</option>
-                              <option value="New Order Received">New Order Received</option>
-                              <option value="Operations Assigned">Operations Assigned</option>
-                              <option value="Event Scheduled">Event Scheduled</option>
-                              <option value="Staff Assigned">Staff Assigned</option>
-                              <option value="Event Completed">Event Completed</option>
-                              <option value="Raw Footage Received">Raw Footage Received</option>
-                              <option value="Editor Assigned">Editor Assigned</option>
-                              <option value="Editing Started">Editing Started</option>
-                              <option value="Editing In Progress">Editing In Progress</option>
-                              <option value="Internal QC Review">Internal QC Review</option>
-                              <option value="Client Review Sent">Client Review Sent</option>
-                              <option value="Revision Required">Revision Required</option>
-                              <option value="Revision In Progress">Revision In Progress</option>
-                              <option value="Final Approval">Final Approval</option>
-                              <option value="Project Delivered">Project Delivered</option>
-                              <option value="Project Closed">Project Closed</option>
-                              <option value="Customer Review">Customer Review</option>
-                              <option value="Approved">Approved</option>
-                              <option value="Delivered">Delivered</option>
-                              <option value="Payment Pending">Payment Pending</option>
-                              <option value="Closed">Closed</option>
+                              <option value="Lost Lead">Lost Lead</option>
                             </select>
                           </div>
                         </div>
@@ -4730,6 +4889,18 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
                                   value={followUpForm.advance_received}
                                   onChange={(e) => setFollowUpForm({ ...followUpForm, advance_received: Number(e.target.value) })}
                                   className="w-full bg-slate-900 border border-slate-750 rounded-lg py-2 px-3 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-slate-400 mb-1">
+                                  Pending Amount (₹) (Auto-calculated)
+                                </label>
+                                <input
+                                  type="number"
+                                  readOnly
+                                  disabled
+                                  value={Number(followUpForm.quotation_amount || 0) - Number(followUpForm.advance_received || 0)}
+                                  className="w-full bg-slate-950 border border-slate-850 rounded-lg py-2 px-3 text-xs text-emerald-400 font-mono focus:outline-none opacity-80 cursor-not-allowed"
                                 />
                               </div>
                               <div>
@@ -4930,6 +5101,64 @@ export const SalesModule: React.FC<SalesModuleProps> = ({ activeSubTab: external
                             </div>
                           )}
                         </div>
+
+                        {/* Record New Payment Form (Only for Sales / Locked state) */}
+                        {isLeadLocked && p.balance_due > 0 && (
+                          <div className="border-t border-slate-800/80 pt-4 space-y-3 text-left">
+                            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block font-sans">
+                              Record Subsequent Payment
+                            </span>
+                            <div className="space-y-3">
+                              <div>
+                                <label className="text-[9.5px] text-slate-500 font-medium block mb-1">Payment Amount Received (₹) *</label>
+                                <input
+                                  type="number"
+                                  value={newPaymentAmount || ''}
+                                  onChange={(e) => setNewPaymentAmount(Number(e.target.value) || 0)}
+                                  className="w-full bg-slate-900 border border-slate-800/85 rounded-lg py-2 px-3 text-xs text-emerald-450 font-extrabold font-mono focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-500/20"
+                                  placeholder="Enter amount paid by customer..."
+                                  max={p.balance_due}
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[9.5px] text-slate-500 font-medium block mb-1">Payment Notes / Txn Reference *</label>
+                                <input
+                                  type="text"
+                                  value={newPaymentNotes}
+                                  onChange={(e) => setNewPaymentNotes(e.target.value)}
+                                  className="w-full bg-slate-900 border border-slate-800/85 rounded-lg py-1.5 px-3 text-xs text-slate-205 focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-500/20"
+                                  placeholder="e.g. Received via GPay Ref #1234..."
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                disabled={newPaymentAmount <= 0 || !newPaymentNotes.trim() || newPaymentAmount > p.balance_due}
+                                onClick={async () => {
+                                  try {
+                                    // 1. Record the payment
+                                    await recordPayment(associatedOrder.order_id, newPaymentAmount, new Date().toISOString().split('T')[0]);
+                                    
+                                    // 2. Append notes to lead remarks
+                                    const combinedNotes = (selectedLead.remarks ? selectedLead.remarks + "\n" : "") + 
+                                      `[Subsequent Payment Received on ${new Date().toLocaleDateString()}]: ₹${newPaymentAmount} - ${newPaymentNotes}`;
+                                    
+                                    await updateLead(selectedLead.lead_id, { remarks: combinedNotes });
+                                    
+                                    // 3. Clear inputs
+                                    setNewPaymentAmount(0);
+                                    setNewPaymentNotes('');
+                                    alert("Subsequent payment recorded successfully.");
+                                  } catch (error: any) {
+                                    alert("Error logging payment: " + error.message);
+                                  }
+                                }}
+                                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-2 px-4 rounded-lg text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                              >
+                                <span>Record Payment & Update Balance</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}

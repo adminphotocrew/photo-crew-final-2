@@ -688,7 +688,7 @@ export const OperationsLeads: React.FC = () => {
             </h3>
           </div>
           <span className="text-[10px] font-mono text-zinc-500">
-            {orders.filter(o => o.current_stage === 'Order Confirmed' || o.current_stage === 'New Order Received').length} Pending Action
+            {orders.filter(o => o.current_stage === 'Order Confirmed').length} Pending Action
           </span>
         </div>
 
@@ -710,7 +710,7 @@ export const OperationsLeads: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-zinc-900">
               {(() => {
-                const newOrdersList = orders.filter(o => o.current_stage === 'Order Confirmed' || o.current_stage === 'New Order Received');
+                const newOrdersList = orders.filter(o => o.current_stage === 'Order Confirmed');
                 if (newOrdersList.length === 0) {
                   return (
                     <tr>

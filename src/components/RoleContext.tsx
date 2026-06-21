@@ -1175,7 +1175,7 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (table === 'orders' && cloned.current_stage) {
       const allowedOrderStages = [
-        'New Lead', 'Follow Up', 'Quotation Sent', 'Negotiation', 'Order Confirmed', 
+        'New Lead', 'Contacted', 'Follow-up', 'Follow Up', 'Quotation Sent', 'Negotiation', 'Order Confirmed', 'Lost Lead', 
         'Operations Assigned', 'Event Scheduled', 'Event Completed', 'Raw Footage Received', 
         'Editing Started', 'Customer Review', 'Approved', 'Delivered', 
         'Payment Pending', 'Closed'
@@ -1195,14 +1195,14 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } else if (['Staff Assigned', 'Event Scheduled'].includes(s)) {
           cloned.current_stage = 'Event Scheduled';
         } else {
-          cloned.current_stage = 'Order Confirmed';
+          cloned.current_stage = s;
         }
       }
     }
 
     if (table === 'leads' && cloned.status) {
       const allowedLeadStatuses = [
-        'New Lead', 'Follow Up', 'Quotation Sent', 'Negotiation', 'Order Confirmed', 
+        'New Lead', 'Contacted', 'Follow-up', 'Follow Up', 'Quotation Sent', 'Negotiation', 'Order Confirmed', 'Lost Lead', 
         'Operations Assigned', 'Event Completed', 'Raw Footage Received', 'Editor Assigned',
         'Editing Started', 'Editing In Progress', 'Internal QC Review', 'Client Review Sent', 'Customer Review', 'Revision Required', 'Revision In Progress', 'Final Approval', 'Approved', 'Project Delivered', 'Delivered', 
         'Payment Pending', 'Project Closed', 'Closed'
@@ -1222,7 +1222,7 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } else if (['Staff Assigned', 'Event Scheduled'].includes(s)) {
           cloned.status = 'Operations Assigned';
         } else {
-          cloned.status = 'Order Confirmed';
+          cloned.status = s;
         }
       }
     }
@@ -1233,7 +1233,8 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
         'lead_id', 'created_date', 'lead_source', 'customer_name', 'mobile', 'alternate_mobile', 
         'email', 'event_type', 'event_date', 'event_time', 'event_location', 'budget', 
         'sales_person', 'status', 'remarks', 'created_by', 'updated_by', 'updated_at', 
-        'assigned_editor', 'assigned_editors', 'production_role', 'delivery_target_date', 'current_status'
+        'assigned_editor', 'assigned_editors', 'production_role', 'delivery_target_date', 'current_status',
+        'final_amount', 'received_amount', 'pending_amount'
       ],
       orders: [
         'order_id', 'lead_id', 'customer_name', 'mobile', 'event_type', 'event_date', 
@@ -1316,6 +1317,9 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // --- CONSTRAINT BYPASS LOGIC ---
       if (table === 'leads') {
         if (sanitized.status) {
+          if (sanitized.status === 'Follow-up' || sanitized.status === 'Follow Up') {
+            sanitized.status = 'Follow Up';
+          }
           sanitized.current_status = sanitized.status;
           // We will attempt to update both. If it fails with constraint error, we will retry with only current_status.
         }
@@ -1641,13 +1645,21 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
             : null;
 
           // Compute final_amount and received_amount
-          const final_amount = assocPayment
-            ? Number(assocPayment.quotation_amount || 0)
-            : (assocOrder ? Number(assocOrder.quotation_amount || 0) : Number(ld.budget || 0));
+          const final_amount = ld.final_amount !== undefined && ld.final_amount !== null
+            ? Number(ld.final_amount)
+            : (assocPayment
+              ? Number(assocPayment.quotation_amount || 0)
+              : (assocOrder ? Number(assocOrder.quotation_amount || 0) : Number(ld.budget || 0)));
 
-          const received_amount = assocPayment
-            ? Number(assocPayment.advance_received || 0) + Number(assocPayment.final_payment_received || 0)
-            : (assocOrder ? Number(assocOrder.advance_received || 0) : 0);
+          const received_amount = ld.received_amount !== undefined && ld.received_amount !== null
+            ? Number(ld.received_amount)
+            : (assocPayment
+              ? Number(assocPayment.advance_received || 0) + Number(assocPayment.final_payment_received || 0)
+              : (assocOrder ? Number(assocOrder.advance_received || 0) : 0));
+
+          const pending_amount = ld.pending_amount !== undefined && ld.pending_amount !== null
+            ? Number(ld.pending_amount)
+            : (final_amount - received_amount);
 
           // Compute assigned staff
           const staffNames: string[] = [];
@@ -1672,14 +1684,25 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Real-time synchronization flow
           const current_status = ld.current_status || assocOrder?.current_stage || prod?.editing_status || ld.status;
 
+          // Parse shoot_type from remarks if stored in [Shoot Type: ...] format
+          let parsedShootType = ld.shoot_type;
+          if (ld.remarks) {
+            const matchShoot = ld.remarks.match(/\[Shoot Type:\s*([^\]]+)\]/);
+            if (matchShoot) {
+              parsedShootType = matchShoot[1].trim();
+            }
+          }
+
           return {
             ...ld,
+            shoot_type: parsedShootType || ld.shoot_type || '',
             status: current_status,
             current_status,
             assigned_staff,
             assigned_editor,
             final_amount,
             received_amount,
+            pending_amount,
             created_at: ld.created_at || ld.created_date || new Date().toISOString()
           };
         });
@@ -2471,12 +2494,16 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const resLead = await pushUpdate('leads', 'lead_id', leadId, { 
       status: 'Order Confirmed', 
+      current_status: 'Order Confirmed',
       event_date: eventDate || targetLead.event_date,
       event_time: eventTime || targetLead.event_time,
       reporting_time: reportingTime || targetLead.reporting_time,
       remarks: resolvedRemarks,
       updated_by: currentUserName, 
-      updated_at: timestamp
+      updated_at: timestamp,
+      final_amount: quotationAmount,
+      received_amount: advanceReceived,
+      pending_amount: quotationAmount - advanceReceived
     });
 
     if (!resLead?.success) {
@@ -3350,7 +3377,9 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const rLead = await pushUpdate('leads', 'lead_id', currentOrder.lead_id, { 
         status: nextStage,
         updated_by: currentUserName,
-        updated_at: timestamp
+        updated_at: timestamp,
+        received_amount: totalPaid,
+        pending_amount: outstanding
       });
       if (!rLead?.success) {
         throw new Error("Failed to update lead: " + rLead?.error);
